@@ -1,0 +1,74 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: learn-assist-db
+    environment:
+      POSTGRES_USER: ${DB_USER:-learnassist}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-supersecret}
+      POSTGRES_DB: ${DB_NAME:-learnassist_db}
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-learnassist} -d ${DB_NAME:-learnassist_db}"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - app-net
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Containerfile
+    container_name: py-backend
+    environment:
+      APP_ENV: ${APP_ENV:-testing}
+      LOG_LEVEL: ${LOG_LEVEL:-debug}
+      SECRET_KEY: ${SECRET_KEY:-dev-secret-do-not-use-in-prod}
+      DB_USER: ${DB_USER:-learnassist}
+      DB_PASSWORD: ${DB_PASSWORD:-supersecret}
+      DB_NAME: ${DB_NAME:-learnassist_db}
+      DB_HOST: db
+      DB_PORT: 5432
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    volumes:
+      - ./backend:/app          # hot-reload in dev
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 30s
+    networks:
+      - app-net
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Containerfile
+      args:
+        - VITE_API_URL=http://localhost:${BACKEND_PORT:-8000}
+    container_name: fe-frontend
+    ports:
+      - "${FRONTEND_PORT:-3000}:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - app-net
+
+volumes:
+  pgdata:
+
+networks:
+  app-net:
+    driver: bridge
